@@ -731,3 +731,65 @@ function multipleGenric<First, Last>(a: First, a2: Last): [First, Last] {
 
 const [a, b] = multipleGenric<string, number>('hi', 12345)
 ```
+
+- 인덱스 시그니처 활용 방법 및 객체의 키는 동적 선언을 최대한 지양해야하며 객체의 타입도 필요에 따라 좁혀야한다.
+```
+type Hello = Record<"hello" | "hi", string>;
+type Hello2 = {
+  [key in "hello" | "hi"]: string;
+};
+
+const hello: Hello = {
+  hello: "hello",
+  hi: "hi",
+};
+
+const hello2: Hello2 = {
+  hello: "hello",
+  hi: "hi",
+};
+
+// Object.keys는 타입스크립트 덕 타이핑에 의해 어떤 객체가 필요한 변수 메서드만 지니고 있어도 해당 타입에 속하도록 인정해주기 때문에 예상과 다른 결과를 얻을 수 있음.
+const result = Object.keys(hello); // string[]....??????
+
+Object.keys(hello).forEach((key) => {
+  const value = hello[key]; // value -> any, key -> string ????????????
+  return value;
+});
+
+Object.keys(hello2).forEach((key) => {
+  const value = hello2[key]; // value -> any, key -> string ????????????
+  return value;
+});
+
+console.log(result);
+
+function KeysOf<T extends object>(obj: T): Array<keyof T> {
+  return Array.from(Object.keys(obj)) as Array<keyof T>; // 타입 단언이 필요함...
+}
+
+const result2 = KeysOf(hello).map((key) => {
+  const value = hello[key]; // value -> string, key -> 'hi' | 'hello' 
+  return value;
+});
+
+console.log(result2);
+```
+- 덕 타이핑은 내부적으로 필요한 형태를 지니고 있다면 동작을 하게 되어 있다. `car: Car` 가 가능한 이유
+```
+type Car = { name: string };
+type Truck = Car & { power: number };
+
+// truck의 Truck 타입만 가능 할 것 같지만 Truck 타입은 Car의 name을 포함 하기 때문에 가능함.
+function horn(car: Car) {
+  console.log(`${car.name}이 경적을 울립니다! 빵빵~`);
+}
+
+const truck: Truck = {
+  name: '비싼차',
+  power: 100,
+};
+
+// 정상적으로 작동한다!
+horn(truck);
+```
