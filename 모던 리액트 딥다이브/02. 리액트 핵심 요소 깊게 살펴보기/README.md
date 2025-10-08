@@ -297,6 +297,498 @@ let escape2 = "\\";  // ✅ OK
   - 파이버 트리 표현
 <img width="464" height="399" alt="image" src="https://github.com/user-attachments/assets/afee8909-edbd-4ed7-a44b-598e7f704d35" />
 
+## 2.3 클래스 컴포넌트와 함수 컴포넌트
+### 2.3.1 클래스 컴포넌트
+- 클래스 컴포넌트 예제
+  - 마운트: 컴포넌트 생성 시점
+  - 업데이트: 이미 생성된 컴포넌트의 내용 변경 시점
+  - 언마운트: 컴포넌트가 더 이상 존재하지 않는 시점점
+    <img width="931" height="695" alt="image" src="https://github.com/user-attachments/assets/2cc1980c-6918-480f-abfa-1a0ea6bf9e67" />
+
+  ```
+  import React from 'react'
+  
+  // ✅ props 타입 선언
+  interface SampleProps {
+    required?: boolean
+    text: string
+  }
+  
+  // ✅ state 타입 선언
+  interface SampleState {
+    count: number
+    isLimited?: boolean
+    isMounted: boolean
+    // ✅ props.text를 state로 동기화해 보관 (필요 시 제거 가능)
+    syncedText: string
+    // ✅ 윈도우 크기 추적 (리사이즈 전/후 비교용)
+    windowWidth: number
+    windowHeight: number
+  }
+  
+  // ✅ 스냅샷 타입 (업데이트 직전 DOM 상태 넘겨주기)
+  type Snapshot = {
+    // 스크롤 보정용
+    prevScrollTop: number
+    prevScrollHeight: number
+    wasAtBottom: boolean
+    // 리사이즈 비교용
+    prevWidth: number
+    prevHeight: number
+  }
+  
+  // ✅ props, state 순으로 제네릭 선언
+  class SampleComponent extends React.Component<SampleProps, SampleState> {
+    private mountTimer?: number
+    private containerRef = React.createRef<HTMLDivElement>() // ✅ 스크롤 컨테이너 참조
+  
+    // ✅ 생성자로 부터 props를 넘겨주고 state를 정의한다. ES2022 부터는 constructor 없이 state 정의 가능
+    constructor(props: SampleProps) {
+      super(props) // React.Component 상위 접근 가능
+      this.state = {
+        count: 0,
+        isLimited: false,
+        isMounted: false,
+        syncedText: props.text, // ✅ 초기 props로 동기화
+        windowWidth: typeof window !== 'undefined' ? window.innerWidth : 0,
+        windowHeight: typeof window !== 'undefined' ? window.innerHeight : 0,
+      }
+      this.handleDecreaseClick = this.handleDecreaseClick.bind(this)
+      this.handleWindowResize = this.handleWindowResize.bind(this)
+    }
+  
+    // ✅ props 변화에 따라 state를 동기화 (static 이므로 this 사용 불가)
+    static getDerivedStateFromProps(nextProps: SampleProps, prevState: SampleState) {
+      if (nextProps.text !== prevState.syncedText) {
+        return { syncedText: nextProps.text }
+      }
+      return null // 변경 없으면 그대로 유지
+    }
+  
+    // ✅ state 변경이 가능하며, 컴포넌트가 마운트되고 준비되는 즉시 실행
+    componentDidMount() {
+      console.log('✅ componentDidMount 실행')
+  
+      // 1초 뒤 isMounted 상태 변경
+      this.mountTimer = window.setTimeout(() => {
+        this.setState({ isMounted: true })
+        console.log('✅ isMounted 상태가 true로 변경되었습니다.')
+      }, 1000) // 1초 뒤 마운트 완료 처리
+  
+      // ✅ 윈도우 리사이즈 이벤트 등록
+      window.addEventListener('resize', this.handleWindowResize)
+    }
+  
+    // ✅ 업데이트 직전의 DOM 상태를 스냅샷으로 캡처하여 componentDidUpdate로 전달
+    // 스크롤 위치/스크롤 높이, 리사이즈 이전 크기 등을 기록
+    getSnapshotBeforeUpdate(prevProps: SampleProps, prevState: SampleState): Snapshot | null {
+      const el = this.containerRef.current
+      if (!el) {
+        return {
+          prevScrollTop: 0,
+          prevScrollHeight: 0,
+          wasAtBottom: false,
+          prevWidth: prevState.windowWidth,
+          prevHeight: prevState.windowHeight,
+        }
+      }
+  
+      const { scrollTop, scrollHeight, clientHeight } = el
+      const wasAtBottom = scrollTop + clientHeight >= scrollHeight - 4 // 바닥 근사치 판정
+      return {
+        prevScrollTop: scrollTop,
+        prevScrollHeight: scrollHeight,
+        wasAtBottom,
+        prevWidth: prevState.windowWidth,
+        prevHeight: prevState.windowHeight,
+      }
+    }
+  
+    // ✅ 업데이트 감지 (이전 props, state, snapshot 비교 가능)
+    componentDidUpdate(prevProps: SampleProps, prevState: SampleState, snapshot: Snapshot | null) {
+      // count 변경 감지
+      if (prevState.count !== this.state.count) {
+        console.log(`🔁 [Update] count가 ${prevState.count} → ${this.state.count} 로 변경되었습니다.`)
+      }
+      // syncedText 변경 감지 (getDerivedStateFromProps 반영 결과)
+      if (prevState.syncedText !== this.state.syncedText) {
+        console.log(
+          `🔁 [Update] syncedText가 "${prevState.syncedText}" → "${this.state.syncedText}" 로 변경되었습니다.`
+        )
+      }
+  
+      // ✅ 스냅샷을 사용한 스크롤 위치 보정 & 리사이즈 로그
+      if (snapshot) {
+        const el = this.containerRef.current
+        // 스크롤 보정: 바닥에 붙어 있었으면 업데이트 후에도 바닥 유지
+        // 아니었다면 증가한 scrollHeight 만큼 상대 위치 보정
+        if (el) {
+          const added = el.scrollHeight - snapshot.prevScrollHeight
+          if (snapshot.wasAtBottom) {
+            el.scrollTop = el.scrollHeight // 바닥 고정
+          } else if (added !== 0) {
+            el.scrollTop = snapshot.prevScrollTop + added // 상대 위치 유지
+          }
+        }
+  
+        // 리사이즈 전/후 비교 로그
+        if (
+          prevState.windowWidth !== this.state.windowWidth ||
+          prevState.windowHeight !== this.state.windowHeight
+        ) {
+          console.log(
+            `🖥️ [Resize] ${snapshot.prevWidth}×${snapshot.prevHeight} → ${this.state.windowWidth}×${this.state.windowHeight}`
+          )
+        }
+      }
+    }
+  
+    // ✅ 언마운트 시 타이머 클리어
+    componentWillUnmount() {
+      console.log('❌ componentWillUnmount 실행')
+      if (this.mountTimer) {
+        clearTimeout(this.mountTimer)
+      }
+      // ✅ 리스너 해제
+      window.removeEventListener('resize', this.handleWindowResize)
+    }
+  
+    // ✅ shouldComponentUpdate: 리렌더링 여부 제어
+    // PureComponent로 대체가 가능하며 1뎁스의 얕은 비교만 가능
+    shouldComponentUpdate(nextProps: SampleProps, nextState: SampleState) {
+      // 1. count나 isMounted가 바뀐 경우만 렌더링 허용 (+ syncedText/크기 비교)
+      if (
+        nextState.count !== this.state.count ||
+        nextState.isMounted !== this.state.isMounted ||
+        nextState.isLimited !== this.state.isLimited ||
+        nextState.syncedText !== this.state.syncedText ||
+        nextState.windowWidth !== this.state.windowWidth ||
+        nextState.windowHeight !== this.state.windowHeight ||
+        nextProps.text !== this.props.text ||
+        nextProps.required !== this.props.required
+      ) {
+        console.log('✅ [shouldComponentUpdate] 렌더링 허용')
+        return true
+      }
+  
+      // 2. 나머지는 렌더링 막기
+      console.log('🚫 [shouldComponentUpdate] 렌더링 차단')
+      return false
+    }
+  
+    // ✅ render 내부에 쓰일 함수 (화살표 함수 상위 스코프에서 this가 결정되기 때문에 굳이 바인딩이 필요없음)
+    private handleIncreaseClick = () => {
+      const newValue = this.state.count + 1
+      this.setState({
+        count: newValue,
+        isLimited: newValue >= 10, // ✅ 문법 수정: "> =" → ">="
+      })
+    }
+  
+    // ✅ 화살표 함수가 아닌 경우 this를 현재 클래스로 바인딩 해야함
+    private handleDecreaseClick() {
+      this.setState((prev) => ({ count: prev.count - 1 }))
+    }
+  
+    // ✅ 윈도우 리사이즈 핸들러
+    private handleWindowResize() {
+      this.setState({
+        windowWidth: window.innerWidth,
+        windowHeight: window.innerHeight,
+      })
+    }
+  
+    // ✅ 렌더링 정의
+    // (this.setState를 절대 호출하면 안됨 => 순수 함수로 항상 같은 결과물을 반환해야하기 때문, 생명주기를 활용하자.)
+    render() {
+      // ✅ props와 state를 this로 부터 꺼낸다.
+      const {
+        props: { required, text },
+        state: { count, isLimited, isMounted, syncedText, windowWidth, windowHeight },
+      } = this
+  
+      // ✅ 마운트 준비 중일 때 로딩 표시
+      if (!isMounted) {
+        return <div>⏳ 컴포넌트 준비 중...</div>
+      }
+  
+      // ✅ 렌더링 (스크롤 테스트용으로 컨테이너에 고정 높이/overflow 부여)
+      return (
+        <div>
+          <h2>Sample Component</h2>
+          <div>{required ? '필수' : '필수아님'}</div>
+          <div>문자: {text}</div>
+          <div>문자 (props→state 동기화): {syncedText}</div>
+          <div>현재 카운트: {count}</div>
+          <div>윈도우 크기: {windowWidth} × {windowHeight}</div>
+  
+          <button onClick={this.handleIncreaseClick} disabled={isLimited}>
+            증가
+          </button>
+          {/*
+           * ✅ 이 방법은 지양하도록 한다.
+           * 렌더링 시 새로운 함수 생성으로 인해 최적화 수행이 어려움
+           *
+           * <button onClick={() => this.handleIncreaseClick()} disabled={isLimited}>
+           *   증가
+           * </button>
+           */}
+          <button onClick={this.handleDecreaseClick}>감소</button>
+  
+          {/* ✅ 스냅샷/스크롤 보정 확인용 컨테이너 */}
+          <div
+            ref={this.containerRef}
+            style={{
+              height: 160,
+              overflow: 'auto',
+              marginTop: 12,
+              border: '1px solid #ddd',
+              padding: 8,
+              lineHeight: 1.6,
+            }}
+          >
+            {/* 스크롤 테스트용 더미 콘텐츠 */}
+            {Array.from({ length: 30 + count }).map((_, i) => (
+              <div key={i}>항목 #{i + 1}</div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+  }
+  
+  export default SampleComponent
+
+  ```
+- 에러 바운더리 예제
+  ```
+  import React, { ErrorInfo, PropsWithChildren } from 'react'
+
+  type Props = PropsWithChildren<{
+    name?: string // ✅ ErrorBoundary 구분용 (예: parent, child)
+  }>
+  
+  type State = {
+    hasError: boolean
+    errorMessage: string
+  }
+  
+  export default class ErrorBoundary extends React.Component<Props, State> {
+    constructor(props: Props) {
+      super(props)
+      this.state = {
+        hasError: false,
+        errorMessage: '',
+      }
+    }
+  
+    // ✅ 자식 컴포넌트에서 오류 발생 시, 새로운 state 반환하여 자식으로 부터 어떤 렌더링을 결정하는 용도로 사용함
+    // Render 단계에서 실행
+    static getDerivedStateFromError(error: Error): State {
+      return {
+        hasError: true,
+        errorMessage: error.toString(),
+      }
+    }
+
+    // Commit 단계에서 실행
+    // ✅ 실제 에러 정보 (error + info.componentStack)를 잡아서 로깅
+    // 자식 컴포넌트에서 에러 발생 시 실행 -> getDerivedStateFromError에서 state를 경정한 이후에 실행
+    componentDidCatch(error: Error, info: ErrorInfo) {
+      console.group(`🚨 [${this.props.name ?? 'ErrorBoundary'}] 에러 발생`)
+      console.error(error)
+      console.info(info.componentStack)
+      console.groupEnd()
+    }
+  
+    render() {
+      // ✅ 에러 발생 시 대체 UI 렌더링
+      if (this.state.hasError) {
+        return (
+          <div style={{ border: '1px solid red', padding: 12, margin: 8 }}>
+            <h2>⚠️ 오류가 발생했습니다.</h2>
+            <p>{this.state.errorMessage}</p>
+            <p>({this.props.name ?? 'unknown boundary'})</p>
+          </div>
+        )
+      }
+  
+      // ✅ 정상 렌더링 시 children 반환
+      return this.props.children
+    }
+  }
+
+
+  import React, { useState } from 'react'
+
+  // 익명 함수로 쓰는 경우는 ErrorBoundary의 프로덕션 레벨에서 windows 함수 전파가 되지 않아 추적이 어려움으로 function 함수로 써서 하자 혹은 익명 함수는 displayName을 명시 해야한다.
+  export default function Child() {
+    const [error, setError] = useState(false)
+  
+    const handleClick = () => {
+      setError((prev) => !prev)
+    }
+  
+    // ✅ 버튼 클릭 시 에러 발생
+    if (error) {
+      throw new Error('Error has been occurred.')
+    }
+  
+    return (
+      <button onClick={handleClick} style={{ margin: 8 }}>
+        에러 발생
+      </button>
+    )
+  }
+
+  import React from 'react'
+  import ErrorBoundary from './ErrorBoundary'
+  import Child from './Child'
+  
+  export default function App() {
+    return (
+      <ErrorBoundary name="parent">
+        {/* ✅ 하위 ErrorBoundary가 별도로 예외를 처리 */}
+        <ErrorBoundary name="child">
+          <Child />
+        </ErrorBoundary>
+      </ErrorBoundary>
+    )
+  }
+  ```
+- 클래스 컴포넌트 한계
+  - 애플리케이션 내부 로직의 재사용이 어렵다.
+    - `componentDidMount`, `componentWillUnmount`, `this.setState` 등 `React.Component`의 외부적 종속으로 인해 분리가 어려움
+    ```
+      // 두 컴포넌트 모두 윈도우 크기를 추적한다고 가정
+      class WindowSizeA extends React.Component {
+        state = { width: window.innerWidth }
+      
+        componentDidMount() {
+          window.addEventListener('resize', this.handleResize)
+        }
+      
+        componentWillUnmount() {
+          window.removeEventListener('resize', this.handleResize)
+        }
+      
+        handleResize = () => this.setState({ width: window.innerWidth })
+      
+        render() {
+          return <div>Width: {this.state.width}</div>
+        }
+      }
+      
+      class WindowSizeB extends React.Component {
+        state = { width: window.innerWidth }
+      
+        componentDidMount() {
+          window.addEventListener('resize', this.handleResize)
+        }
+      
+        componentWillUnmount() {
+          window.removeEventListener('resize', this.handleResize)
+        }
+      
+        handleResize = () => this.setState({ width: window.innerWidth })
+      
+        render() {
+          return <div>너비: {this.state.width}</div>
+        }
+      }
+
+      // HOC를 통한 우회책으로 wrapper hell에 빠질 수 있고 흐름을 쫓아야 하는 문제로 복잡도 증가 문제가 있어 보임.
+      // 현재는 hooks로 분리가 가능함.
+      function withWindowSize(WrappedComponent) {
+        return class extends React.Component {
+          state = { width: window.innerWidth }
+          componentDidMount() {
+            window.addEventListener('resize', this.handleResize)
+          }
+          componentWillUnmount() {
+            window.removeEventListener('resize', this.handleResize)
+          }
+          handleResize = () => this.setState({ width: window.innerWidth })
+          render() {
+            return <WrappedComponent width={this.state.width} {...this.props} />
+          }
+        }
+      }
+    ```
+  - 코드 크기를 최적화 하기 어렵다.
+    - 번들링 최적화가 잘 되지 않아 트리 쉐이킹이 되지 않고 handleChange을 번들 그대로 나타난 모습을 볼 수 있다.
+    ```
+    import React from 'react'
+
+    export class Example extends React.PureComponent {
+      state = { count: 1 }
+    
+      handleClick = () => {
+        console.log('clicked')
+        this.setState({ count: this.state.count + 1 })
+      }
+    
+      handleChange = () => {
+        console.log('changed')
+      }
+    
+      render() {
+        return (
+          <div>
+            Count: {this.state.count}
+            <button onClick={this.handleClick}>+</button>
+          </div>
+        )
+      }
+    }
+
+    function Example(e) {
+      var n;
+    
+      // 클래스 호출 보장(ES5 변환 시 보일 수 있는 패턴)
+      return (
+        (function (e, n) {
+          if (!(e instanceof n)) throw new TypeError('Cannot call a class as a function');
+        })(this, Example),
+    
+        // super 호출과 비슷한 헬퍼
+        ((n = SomeSuper.call(this, e)).handleClick = function () {
+          console.log('handleClick!');
+          n.setState({ count: 1 });
+        }),
+    
+        // ❗ 사용하지 않아도 인스턴스에 메서드가 남아 있음
+        (n.handleChange = function () {
+          console.log('handleChanged!');
+        }),
+    
+        // 초기 state
+        (n.state = { count: 1 }),
+    
+        n
+      );
+    }
+    ```
+  - 핫 리로딩에도 불리하다.
+    - 클래스 함수 특성상 인스턴스 기반으로 동작하기 때문에 코드 수정 시 새로운 인스턴스를 생성하여 상태 유지가 되지 않는다.
+    - 함수 컴포넌트의 `useState`의 경우 클로저로 되어 있기 때문에 함수 정의만 교체되며 클로저 상태가 복원된다.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
