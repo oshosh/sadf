@@ -773,13 +773,86 @@ let escape2 = "\\";  // ✅ OK
     - 클래스 함수 특성상 인스턴스 기반으로 동작하기 때문에 코드 수정 시 새로운 인스턴스를 생성하여 상태 유지가 되지 않는다.
     - 함수 컴포넌트의 `useState`의 경우 클로저로 되어 있기 때문에 함수 정의만 교체되며 클로저 상태가 복원된다.
 
+### 2.3.3 함수 컴포넌트 vs 클래스 컴포넌트
+  - React.Component vs Hooks
+    - 예를 들면 `useEffect`가 `componentDidMount, `componentDidUpdate`, `componentWillUnMount`를 비슷하게 구현 할 수 있다. 즉, `useEffect`는 side Effect 이다. 클래스 컴포넌트 처럼 인스턴스를 새로 생성하지 않는다.
+  - 클로저의 활용
+    - https://overreacted.io/how-are-function-components-different-from-classes/
+      - 위 글을 읽어보면 함수 컴포넌트와 클래스 컴포넌트의 클로저 활용으로 인한 `props` 변화의 차이를 볼 수 있음.
+
+## 2.4 렌더링은 어떻게 일어나는가?
+### 2.4.2 리액트의 렌더링이 일어나는 이유
+  - 최초 렌더링
+  - 리렌더링
+    - 클래스 컴포넌트에서 `setState` 가 반영될 때
+    - 클래스 컴포넌트에서 `forceUpdate` 가 실행될 때
+    - 함수 컴포넌트의 `useState`의 두번째 인자인 `setter`가 실행될 때
+    - 함수 컴포넌트의 `useReducer`의 두번째 인자인 `dispatch` 실행될 때
+    - 컴포넌트의 `props key`가 변경 되는 경우
+    - 부모의 props가 변경 되었을때
+
+### 2.4.4 렌더와 커밋
+  - 렌더 단계: 가상 DOM을 비교하는 과정을 거쳐 변경이 필요한 컴포넌트를 체크하는 단계로 type, key, props 이 중 변경 사항이 있는 경우 변경이 필요한 컴포넌트로 체크된다. 
+    ```
+    React.createElement(
+      TestComponent,
+      {a: 35, b: 'hi'},
+      '안녕하세요'
+    )
+    // 브라우저 UI 구조로 설명 할 수 있는 자바스크립트 객체로 변환
+    {type: TestComponent, props: {a: 35, b: 'hi', children: "안녕하세요."} }
+    ```
+  - 커밋 단계: 실제 DOM에 적용해 사용자에게 보여주는 과정이며, 이 단계가 끝나야 브라우저의 렌더링이 발생됨. 필요에 따라 렌더링이 생략될 수도 있음 예를 들면 부모로 부터 자식으로 전파되는 props의 값 변경에 대하여 메모라이제이션 처리가 되었을 경우 등..
 
 
+## 2.5 컴포넌트와 함수의 무거운 연상을 기억해 두는 메모라이제이션
+  - 두 가지 차이점이 있다. 메모라이제이션 비용이 더 나가느냐 혹은 렌더링에 따른 비용이 더 나가느냐에 따라 의견이 다르다.
+  - 일단은 메모라이제이션을 쓰는 것 보단 최적화 할 수 있는 코드를 일단 더 연구를 하는 방향이 맞아 보인다.
+    ```
+    import { useState, useEffect, useMemo } from 'react'
+    import './App.css'
 
+    function useMath(number: number) {
+    const [double, setDouble] = useState(0);
+    const [triple, setTriple] = useState(0);
 
+    useEffect(() => {
+      setDouble(number * 2)
+      setTriple(number * 3)
+    }, [number])
 
+    // handleClick 시 새로운 객체 생성 발생...
+    //  return {double , triple} 
+      return useMemo(() => {
+        return { double, triple }
+      }, [double, triple])
+    }
 
+    function App() {
+      const [count, setCount] = useState(0)
+      const value = useMath(10);
 
+      // 새로운 객체 생성 인지로 인해 console.log가 계속 찍힘
+      // react 19버전에서는 react-compiler를 통해 이런 문제들이 해결이 어느정도 됨.
+      useEffect(() => {
+        console.log(value.double, value.triple)
+      }, [value])
+
+      const handleClick = () => {
+        setCount((prev) => prev + 1)
+      }
+
+      return (
+        <>
+        <h1>Counter: {count}</h1>
+        <button onClick={handleClick}>+</button>
+        </>
+      )
+    }
+
+    export default App
+
+    ```
 
 
 
