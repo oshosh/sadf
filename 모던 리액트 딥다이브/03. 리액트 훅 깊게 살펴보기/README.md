@@ -77,11 +77,12 @@
       }
     })()
     ```
-### 3.1.23`useMemo`
+### 3.1.3`useMemo`
   - 비용이 큰 연산에 대한 결과를 저장하고 이 저장된 값을 반환하는 훅
 
-### 3.1.23`useCallback`
+### 3.1.4`useCallback`
   - useMemo가 값을 기억했다면, useCallback은 인수로 넘겨받은 콜백를 기억함. 특정함수를 새로만들지 않고 다시 재사용
+  - 크롬 > 메모리 > 타임라인 할당에서 확인해보면 `useCallback`을 사용하지 않으면 메모리 누수가 있다.
   ```
   const ChildComponent = memo (({name, value, onChange}) => {
     // memo로 감쌌기 때문에 이전 props 데이터는 memo의 얕은 비교를 통해 메모라이징 효과가 발동 된다.
@@ -127,5 +128,155 @@
 
   export default App
   ```
-  
+  - `useCallback`은 `useMemo`를 사용해서 구현할 수 있다.
+    ```
+    export function useCallback(callback, args) {
+      currentHook = 8
+      return useMemo(()=> callback, args)
+    }
+    ```
+### 3.1.5 `useRef`
+  - `useState`와 동일하게 컴포넌트 내부에서 렌더링이 일어나도 변경 가능한 상태 값을 저장하는 공통점이 있으나 차이점 두가지가 존재한다.
+  - 차이점
+    - 반환값인 객체 내부에 있는 `current`로 값에 접근 또는 변경할 수 있다.
+    - 그 값이 변하더라도 렌더링을 발생시키지 않는다.
+  - 차이점을 알기전에 `useRef` 왜 필요한가?
+    - `useRef`을 사용하지 않아도 값을 공유 할 수 있다 생각하고 아래 코드와 같은 가정해보자
+      - 컴포넌트가 렌더링 되지 않아도 기본적인 `value`의 값을 가지게 되는 문제가 발생된다. (메모리 누수)
+      - 컴포넌트가 초기화 되는 지점이 다르더라도 하나의 값을 바라보는 경우가 아닌 다수의 컴포넌트들은 인스턴스 하나당 하나의 값을 필요로 하지만 value의 값이 공유되는 문제가 있다.
+      ```
+      let value = 0
+
+      function Component() {
+        function handleClick() {
+          value += 1
+        }
+      }
+      ```
+  - 위와 같은 문제로 `useRef`를 사용하게 된다. 기본적인 예제 코드
+    ```
+    function RefComponent() {
+      const inputRef = useRef()
+      console.log(inputRef.current) // undefined
+
+      useEffect(()=> {
+        console.log(inputRef.current) // <input type="text" />
+      }, [inputRef])
+
+      return <input ref={inputRef} type="text" />
+    }
+    ```
+  - 의외로 구현 또한 간단하다.
+    ```
+    export function useRef(initialValue) {
+      cunrrentHook = 5
+      return useMemo(()=> ({current: initialValue}), [])
+    }
+    ```
+### 3.1.6 `useContext`
+  - context 란?
+    - 리액트에서는 부모와 자식은 트리구조로 이루어져 있으며, 데이터 전달 시 `props`를 통해 데이터를 전달 해주지만 부모, 자식간에 데이터 깊이가 깊어질 수록 관리가 힘들다 이렇게 내려주는 기법을 `props drilling` 이라고 하며 번거로운 작업을 극복하기 위해 등장한 개념이 `context`이다.
+  - 코드
+    - 재사용이 어려움으로 최대한 컴포넌트를 작게 하거나 재사용되지 않을 정도의 컴포넌트로 작성하여 컨텍스트를 좁해야 한다.
+    - 상태 관리 API가 아니라 콘텍스트는 상태를 주입을 해주는 API 이다.
+      - 상태 관리 라이브러리는 어떠한 상태를 기반으로 다른 상태를 만들 수 있어야 하며, 필요에 따라 변화를 최적화할 수 있어야 한다.
+      - 콘텍스트는 단순히 props를 하위로 전달 해줄 뿐 렌더링이 최적화되지 않기 때문에 전부 리렌더링이 발생된다. 
+    ```
+    const MyContext = createContext<{ hello: string } | undefined>(undefined)
+
+    function ContextProvider({
+      children,
+      text,
+    }: PropsWithChildren<{ text: string }>) {
+      return (
+        <MyContext.Provider value={{ hello: text }}>{children}</MyContext.Provider>
+      )
+    }
+    
+    function useMyContext() {
+      const context = useContext(MyContext)
+      if (context === undefined) {
+        throw new Error(
+          'useMyContext는 ContextProvider 내부에서만 사용할 수 있습니다.',
+        )
+      }
+      return context
+    }
+    
+    function ChildComponent() {
+      // 타입이 명확히 설정돼 있어서 굳이 undefined 체크를 하지 않아도 된다.
+      // 이 컴포넌트가 Provider 하위에 없다면 에러가 발생할 것이다.
+      const { hello } = useMyContext()
+    
+      return <>{hello}</>
+    }
+    
+    function ParentComponent() {
+      return (
+        <>
+          <ContextProvider text="react">
+            <ChildComponent />
+          </ContextProvider>
+        </>
+      )
+    }
+    ```
+
+### 3.1.7 `useReducer`
+  - `useReducer`의 반환 값
+    - state: 현재 useReducer 가 가지고 있는 값
+    - dispatcher: state를 업데이트하는 함수. state를 변경할 수 있는 `action`을 넘기게 된다.
+  - `useReducer`의 인수
+    - reducer: 기본 action을 정의하는 함수
+    - initialState: useReducer의 초깃값을 의미
+    - init: useState의 게으른 초기화 처럼 초깃값을 지연해서 생성시키고 싶을 때 사용하는 `함수`이다. 
+  - `useReducer` 와 `useState`는 상호 보완적 같은 관계 같아 서로 같은 구현이 가능하다.
+    - `useReducer` -> `useState`
+      ```
+      function reducer(prevState, newState) {
+        return typeof newState === "function" ? newState(prevState) : newState;
+      }
+      
+      function init(initialArg: Initializer) {
+        return typeof initialArg === "function" ? initialArg() : initialArg;
+      }
+      
+      function useState(initialArg) {
+        return useReducer(reducer, initialArg, init)
+      }
+
+      // ex
+      const [count, setCount] = useState(0);
+      setCount((prev)=> prev + 1) // function
+
+      // useState 내부 훅...
+      reducer(prevState = 0, (prev)=> prev + 1)) => (prev)=> 0 + 1 -> 1)
+      ```
+    - `useState` -> `useReducer`
+      ```
+      const useReducer = (reducer, initialArg, init) => {
+        const [state, setState] = useState(init ? () => init(initialArg) : initialArg);
+      
+        const dispatch = useCallback((action) => setState((prev) => reducer(prev, action)), [reducer]);
+      
+        return useMemo(() => [state, dispatch], [state, dispatch]);
+      };
+      ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   
