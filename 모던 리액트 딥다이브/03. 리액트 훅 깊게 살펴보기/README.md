@@ -77,3 +77,55 @@
       }
     })()
     ```
+### 3.1.23`useMemo`
+  - 비용이 큰 연산에 대한 결과를 저장하고 이 저장된 값을 반환하는 훅
+
+### 3.1.23`useCallback`
+  - useMemo가 값을 기억했다면, useCallback은 인수로 넘겨받은 콜백를 기억함. 특정함수를 새로만들지 않고 다시 재사용
+  ```
+  const ChildComponent = memo (({name, value, onChange}) => {
+    // memo로 감쌌기 때문에 이전 props 데이터는 memo의 얕은 비교를 통해 메모라이징 효과가 발동 된다.
+    useEffect(() => {
+      console.log('rendering', name)
+    })
+    return (
+      <>
+        <h1>{name}: {value ? 'true' : 'false'}</h1>
+        <button onClick={onChange}>Toggle</button>
+      </>
+    )
+  })
+  
+  function App() {
+    const [status1, setStatus1] = useState(false)
+    const [status2, setStatus2] = useState(false)
+
+
+    // const toggle1 = () => {
+    //   setStatus1(!status1)
+    // }
+    // const toggle2 = () => {
+    //   setStatus2(!status2)
+    // }
+
+    const toggle1 = useCallback(() => {
+      setStatus1(!status1)
+    }, [status1])
+
+    const toggle2 = useCallback(() => {
+      setStatus2(!status2)
+    }, [status2])
+
+    return (
+      <>
+        <!-- useCallback을 쓰는 경우 리렌더링 시 특정 함수를 재 사용하기 때문에 status1 변경 시 status2는 리렌더링을 막을 수 있음.  -->
+        <ChildComponent name="status1" value={status1} onChange={toggle1} />
+        <ChildComponent name="status2" value={status2} onChange={toggle2} />
+      </>
+    )
+  }
+
+  export default App
+  ```
+  
+  
