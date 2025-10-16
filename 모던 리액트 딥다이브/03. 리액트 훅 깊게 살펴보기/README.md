@@ -169,7 +169,7 @@
   - 의외로 구현 또한 간단하다.
     ```
     export function useRef(initialValue) {
-      cunrrentHook = 5
+      currentHook = 5
       return useMemo(()=> ({current: initialValue}), [])
     }
     ```
@@ -262,10 +262,98 @@
         return useMemo(() => [state, dispatch], [state, dispatch]);
       };
       ```
+### 3.1.8 `useImperativeHandle`
+  - 위 훅을 학습 하기 전 `React.forwardRef`에 대하여 살펴 봐야 한다.
+    - `React.forwardRef`는 상위 컴포넌트에서 접근 하고 싶은 ref을 직접 props를 통해 전달할때 명시적으로 예측 할 수 있다.
+    ```
+    // `React.forwardRef` 를 쓰지 않는 경우
+    function ChildComponent ({parentRef}) {
+      .... code ...
+    }
 
+    function ParentComponent() {
+        const inputRef = useRef()
 
+        return (
+          <>
+            <ChildComponent parentRef={inputRef} />
+          </>
+        )
+    }
 
+    // `React.forwardRef` 사용
+    function ChildComponent = forwardRef((props, ref)=> {
+      ...
+    })
+    function ParentComponent() {
+        const inputRef = useRef()
 
+        return (
+          <>
+            <ChildComponent ref={inputRef} />
+          </>
+        )
+    }
+    ```
+  - `useImperativeHandle`는 부모로 부터 넘겨 받은 `ref`를 마음대로 수정 할 수 있다.
+  ```
+  import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+
+  type ChildHandle = { handleClick: () => void };
+  type ChildProps = { count: number };
+
+  const ChildComponent = forwardRef<ChildHandle, ChildProps>((props, ref) => {
+    useImperativeHandle(ref, () => ({
+      handleParentClick() {
+        console.log('child handleClick', props.count);
+      },
+    }), [props.count]);
+
+    return (
+      <div>
+        자식
+      </div>
+    );
+  });
+
+  function App() {
+    const [count, setCount] = useState(0);
+    const childRef = useRef<ChildHandle>(null);
+
+    const handleClick = () => {
+      childRef.current?.handleParentClick();
+    };
+
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setCount(Number(e.target.value));
+    };
+
+    return (
+      <>
+        <input type="text" value={count} onChange={handleChange} />
+        <button onClick={handleClick}>부모에서 자식 메서드 호출</button>
+        <ChildComponent ref={childRef} count={count} />
+      </>
+    );
+  }
+  export default App
+
+  ```
+### 3.1.9 `useLayoutEffect`
+  - 브라우저가 렌더링 되기전 실행이 되며 `useLayoutEffect`가 완료 될 때까지 컴포넌트가 잠시 동안 중지되는 것(동기성)과 같은 일이 발생된다.
+  - 즉, 모든 Dom 이 변경 후 동기적으로 발생
+    - 리액트가 DOM을 업데이트
+    - useLayoutEffect 실행
+    - 브라우저 변경 사항 반영
+    - useEffect 실행
+  - 성능상 문제 발생의 여지가 있기 때문에 화면이 반영되기전 작업 즉, 스크롤 계산, 애니메이션 등 자연스러운 UX를 제공하는데 사용하면 된다.
+
+### 번외
+  - 고차 컴포넌트 (HOC)
+    - 주의 사항: 
+      - `with` prefix 사용
+      - 인수로는 `Component`를 넘겨주고 `props`를 임의로 수정, 추가, 삭제하는 일이 없어야 한다.
+      - 여러개의 고차 컴포넌트로 감싸는 경우 복잡성이 커지므로 최소한으로만 사용한다.
 
 
 
@@ -280,3 +368,4 @@
 
 
   
+ 
