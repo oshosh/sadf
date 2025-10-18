@@ -206,21 +206,400 @@
         // Warning: Text content did not match. Server: "1676641135288" Client: "1676641137261"
         ReactDOM.hydrate(<App />, rootElement);
       ```
+### 4.2.6 서버 사이드 렌더링 예제
+- `index.tsx`
+  - 앞서 살펴본 바와 같이 `hydrate` 시에는 `<App />`과 HTML로 부터 내려받는 `el`이 같아야 정상적으로 SSR이 동작하게 된다.
+  ```
+  import React from 'react'
+  import { hydrate } from 'react-dom'
+  
+  import App from './components/App'
+  import { fetchTodo } from './fetch'
+  
+  async function main() {
+    const result = await fetchTodo()
+  
+    const app = <App todos={result} />
+    const el = document.getElementById('root')
 
+    // app = el 은 동일한 결과물이어야 한다.
+    hydrate(app, el)
+  }
+  
+  main()
+  ```
+- `App.tsx`, `Todo.tsx`
+  - 간단한 Todo 목록 조회 및 토글 변경 이벤트를 넣어 `hydrate`가 잘 되는지 간단한 예제를 넣는다.
+  ```
+  // `App.tsx`
+  import React, { useEffect } from 'react'
+  
+  import { TodoResponse } from '../fetch'
+  
+  import { Todo } from './Todo'
+  
+  export default function App({ todos }: { todos: Array<TodoResponse> }) {
+    useEffect(() => {
+      console.log('하이!') // eslint-disable-line no-console
+    }, [])
+  
+    return (
+      <>
+        <h1>나의 할일!</h1>
+        <ul>
+          {todos.map((todo, index) => (
+            <Todo key={index} todo={todo} />
+          ))}
+        </ul>
+      </>
+    )
+  }
 
+  // `Todo.tsx`
+  import React, { useState } from 'react'
 
+  import { TodoResponse } from '../fetch'
+  
+  export function Todo({ todo }: { todo: TodoResponse }) {
+    const { title, completed, userId, id } = todo
+    const [finished, setFinished] = useState(completed)
+  
+    function handleClick() {
+      setFinished((prev) => !prev)
+    }
+  
+    return (
+      <li>
+        <span>
+          {userId}-{id}) {title} {finished ? '완료' : '미완료'}
+          <button onClick={handleClick}>토글</button>
+        </span>
+      </li>
+    )
+  }
+  ```
+- `index.html`
+  - `__placeholder__` : HTML에 대한 파싱 정보 데이터는 전부 여기로 반영 된다.
+  - `unpkg`: npm 라이브러리를 CDN으로 제공하고 있고 react와 react.dom을 확인 할 수 있다.
+  - `browser.js`: 클라이언트 리액트 애플리케이션 코드를 번들링 할때 제공되는 리액트 자바스크립트 코드이다.
+    - `__placeholder__`에서 HTML이 삽입되면 이후 이 코드가 실행되면서 필요한 이벤트 핸들러가 붙는다.
+  ```
+  <!DOCTYPE html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>SSR Example</title>
+    </head>
+    <body>
+      __placeholder__
+      <script src="https://unpkg.com/react@17.0.2/umd/react.development.js"></script>
+      <script src="https://unpkg.com/react-dom@17.0.2/umd/react-dom.development.js"></script>
+      <script src="/browser.js"></script>
+    </body>
+  </html>
+  ```
+- `server.ts`
+```
+import { createReadStream } from 'fs'
+import { createServer, IncomingMessage, ServerResponse } from 'http'
 
+import { createElement } from 'react'
+import { renderToNodeStream, renderToString } from 'react-dom/server'
 
+import indexEnd from '../public/index-end.html'
+import indexFront from '../public/index-front.html'
+import html from '../public/index.html'
 
+import App from './components/App'
+import { fetchTodo } from './fetch'
 
+const PORT = process.env.PORT || 3000
 
+// http 서버 라우트 별 동작
+async function serverHandler(req: IncomingMessage, res: ServerResponse) {
+  const { url } = req
 
+  switch (url) {
+    case '/': {
+      // App과 el의 노출 형태를 동일 시 하기 위해선 어쩔 수 없이 두번 호출 하는 형태로 일단 진행
+      const result = await fetchTodo()
 
+      const rootElement = createElement(
+        'div',
+        { id: 'root' },
+        createElement(App, { todos: result }),
+      )
+      // html 생성 및 __placeholder__ 통해 서버 응답 제공
+      const renderResult = renderToString(rootElement)
+      const htmlResult = html.replace('__placeholder__', renderResult)
 
+      res.setHeader('Content-Type', 'text/html')
+      res.write(htmlResult)
+      res.end()
+      return
+    }
 
+    case '/stream': {
+      res.setHeader('Content-Type', 'text/html')
+      res.write(indexFront)
 
+      // App과 el의 노출 형태를 동일 시 하기 위해선 어쩔 수 없이 두번 호출 하는 형태로 일단 진행
+      const result = await fetchTodo()
+      const rootElement = createElement(
+        'div',
+        { id: 'root' },
+        createElement(App, { todos: result }),
+      )
 
+      const stream = renderToNodeStream(rootElement)
+      stream.pipe(res, { end: false })
+      stream.on('end', () => {
+        res.write(indexEnd)
+        res.end()
+      })
+      return
+    }
+    
+    case '/browser.js': {
+      // 브라우저에 제공되는 리액트 코드
+      res.setHeader('Content-Type', 'application/javascript')
+      createReadStream(`./dist/browser.js`).pipe(res)
+      return
+    }
 
+    case '/browser.js.map': {
+      // 브라우저에 제공되는 리액트 코드의 소스 맵
+      res.setHeader('Content-Type', 'application/javascript')
+      createReadStream(`./dist/browser.js.map`).pipe(res)
+      return
+    }
+
+    default: {
+      res.statusCode = 404
+      res.end('404 Not Found')
+    }
+  }
+}
+
+function main() {
+  // http 서버 생성
+  createServer(serverHandler).listen(PORT, () => {
+    console.log(`Server has been started ${PORT}...`) // eslint-disable-line no-console
+  })
+}
+
+main()
+
+==========================================================================
+`/stram 라우터` 는 실행된 console에 아래 와 같이 넣고 확인한다.
+const main = async () => {
+  // 크롬에서 발생한 네트워크 요청을 복사해서 가져왔다.
+  const response = await fetch('http://localhost:3000/stream');
+  const reader = response.body.getReader(); // fetch api를 수동으로 읽어 드림
+
+  while (true) {
+    const { value, done } = await reader.read(); // 스트림을 순차적으로 청크 단위로 읽어옴.
+    const str = new TextDecoder().decode(value); // 문자열 변환
+    if (done) {
+      break;
+    }
+    console.log(`=================================`);
+    console.log(str);
+  }
+
+  console.log('Response fully received');
+};
+
+main();
+```
+- webpack.config.js
+```
+// @ts-check
+/** @typedef {import('webpack').Configuration} WebpackConfig **/
+const path = require('path')
+
+const nodeExternals = require('webpack-node-externals')
+
+/** @type WebpackConfig[] */
+const configs = [
+  {
+    entry: {
+      browser: './src/index.tsx',
+    },
+    output: {
+      path: path.join(__dirname, '/dist'),
+      filename: '[name].js',
+    },
+    resolve: {
+      extensions: ['.ts', '.tsx'],
+    },
+    devtool: 'source-map',
+    module: {
+      rules: [
+        {
+          test: /\.tsx?$/,
+          loader: 'ts-loader',
+        },
+      ],
+    },
+    externals: {
+      react: 'React',
+      'react-dom': 'ReactDOM',
+    },
+  },
+  {
+    entry: {
+      server: './src/server.ts',
+    },
+    output: {
+      path: path.join(__dirname, '/dist'),
+      filename: '[name].js',
+    },
+    resolve: {
+      extensions: ['.ts', '.tsx'],
+    },
+    devtool: 'source-map',
+    module: {
+      rules: [
+        {
+          test: /\.tsx?$/,
+          loader: 'ts-loader', 
+        },
+        {
+          test: /\.html$/,
+          use: 'raw-loader', // html을 string으로 다시 읽어 드리기게 되어 replace 시 html을 재결합 할때 쓰임
+        },
+      ],
+    },
+    target: 'node',
+    externals: [nodeExternals()],
+  },
+]
+
+module.exports = configs
+```
+## 4.3 Next.js 톺아보기 (12.2.5)
+- `package.json`
+  - eslint-config-next: 구글과 협업해 만든 핵심 웹 지표 규칙이 내장되어 있음.
+- `next.config.js`
+  - reactStrictMode: react의 엄격 모드와 같으며 `13.5` 버전 부터는 디폴트가 `true`로 되어 있어 따로 끄려면 선언이 필요함.
+  - swcMinify: 번들링과 컴파일러를 더욱 빠르게 수행 할 수 있으나 `15`버전 부터는 플래그 지원이 중단이 되고 기본 제공으로 변경되었음.
+- `pages/_app.tsx`
+  - 시작점으로 콘솔을 넣어봤을때, 서버 사이드 렌더링 이후 클라이언트에서 _app.tsx의 렌더링이 실행된다는 것을 짐작 할 수 있음
+    - 에러 바운더리를 사용해 전역 에러 처리
+    - 전역 css 선언
+    - 모든 페이지에 공통 사용 혹은 제공해야 하는 데이터 제공
+- `pages/_document.tsx`
+  - _app.tsx가 애플리케이션 초기화라고 보면 여기는 html 초기화이다.
+  - SEO 정보를 담을 수 있다.
+    - `getServerSideProps`, `getStaticProps` 등 서버에서 사용 가능한 데이터 불러오는 함수는 여기서 사용은 못한다.
+- `pages/_error.tsx`
+  - 클라이언트에서 발생하는 에러 또는 서버에서 발생하는 500 에러를 처리할 목적으로 쓰인다. 개발 모드에서는 접근이 불가능하고 프로덕션 빌드에서 확인이 가능하다.
+  - `500.tsx` 도 있지만 `_error.tsx`보다 `500.tsx`의 우선순위가 높
+- `pages_404.tsx`
+  - 페이지 이름 그대로 404 페이지를 정의할 수 있는 파일이다.
+- 다이나믹 라우트
+  ```
+  // pages/hi/[...props].tsx
+  import { useRouter } from 'next/router'
+  import { useEffect } from 'react'
+  import type { GetServerSideProps, NextPage } from 'next'
+  
+  type PageProps = {
+    // URL 세그먼트들이 전부 문자열 배열로 들어온다. (없으면 빈 배열)
+    props: string[]
+  }
+  
+  const HiAll: NextPage<PageProps> = ({ props }) => {
+    const { query } = useRouter() // 클라이언트에서 꺼내는 법
+  
+    useEffect(() => {
+      // 서버에서 내려준 props와 클라이언트 query 비교용
+      console.log('query from router:', query)
+      console.log('serverProps:', props)
+      console.log(JSON.stringify(query.props) === JSON.stringify(props)) // true
+    }, [query, props])
+  
+    return (
+      <>
+        <h1>hi!</h1>
+        <ul>
+          {props.map((item, i) => (
+            <li key={`${i}:${item}`}>{item}</li>
+          ))}
+        </ul>
+      </>
+    )
+  }
+  
+  export const getServerSideProps: GetServerSideProps<PageProps> = async (context) => {
+    // 서버에서 값 가져오는 법 (문자열 배열 or undefined)
+    const { props } = context.query as { props?: string[] | string }
+  
+    // next/router의 catch-all은 항상 "배열" 형태로 다루는 게 안전함
+    const asArray = Array.isArray(props) ? props : props ? [props] : []
+  
+    return {
+      props: {
+        props: asArray,
+      },
+    }
+  }
+  
+  export default HiAll
+  ```
+- 서버 라우팅과 클라이언트 라우팅의 차이
+  - Next.js는 서버 사이드 렌더링을 수행하지만 동시에 SPA처럼 클라이언트 라우팅 또한 수행한다.
+  ```
+  export default function Hello() {
+    console.log(typeof window === "undefined" ? "서버" : "클라이언트");
+  
+    return <>hello</>;
+  }
+  
+  export const getServerSideProps = () => {
+    return {
+      props: {},
+    };
+  };
+  
+  // Home.tsx
+  import type { NextPage } from "next";
+  import Link from "next/link";
+  
+  const Home: NextPage = () => {
+    return (
+      <ul>
+        <li>
+          {/* next의 eslint 룰을 잠시 끄기 위해 추가했다. */}
+          {/* eslint-disable-next-line */}
+          <a href="/hello">A 태그로 이동</a>
+        </li>
+        <li>
+          {/* 차이를 극적으로 보여주기 위해 해당 페이지의 리소스를 미리 가져오는 prefetch를 잠시 꺼두었다. */}
+          <Link prefetch={false} href="/hello">
+            next/link로 이동
+          </Link>
+        </li>
+      </ul>
+    );
+  };
+  
+  export default Home;
+  ```
+  - a태그로 이동하는 것과 Link태그로 이동하는 것은 차이점이 있다. 
+    - a 태그로 이동하는 경우에는 페이지를 만드는데 필요한 모든 리소스를 처음부터 다 가져오고, 서버와 클라이언트가 동시에 찍힌다.
+    - Link 태그로 이동하는 경우에는 클라이언트에서만 필요한 자바스크립트만 불러온 뒤 클라이언트 라우팅/렌더링 방식으로 동작한다.
+
+  - 페이지에서 getServerSideProps를 제거하면 어떻게 될까?
+    - Hello컴포넌트 에 getServerSideProps를 제거한 뒤 빌드 후 실행해보면 a태그, Link태그에 상관없이 서버에 로그가 남지 않는다.
+      - 정적인 페이지로 분류되어 빌드 시점에 미리 트리쉐이킹을 해버렸기 때문이다.
+      - Next.js가 단순히 서버 사이드 프레임워크라 하여 모든 작업이 서버에서 일어나는 것이 아니라는 점이다.
+
+- `/pages/api/hello.ts`
+  - 서버의 API를 정의하는 폴더
+  - 서버에서만 실행되고 window, document 등 브라우저에서 접근할 수 있는 코드를 작성하면 문제가 발생 (BFF, CORS 우회, 풀스택 구축 등)
 
 
 
