@@ -601,8 +601,112 @@ module.exports = configs
   - 서버의 API를 정의하는 폴더
   - 서버에서만 실행되고 window, document 등 브라우저에서 접근할 수 있는 코드를 작성하면 문제가 발생 (BFF, CORS 우회, 풀스택 구축 등)
 
+### 4.3.3 Data Fetching
+ - `Next.js`에서는 데이터 불러오기 전략이 있는데, 이를 Data Fetching 이라고 한다.
+   - `pages/` 폴더에 있는 라우팅이 되는 파일에서만 사용이 가능
+   - 예약어로 지정되어 있으며, 정해진 함수명으로 export 하여 외부로 보내야한다.
+ - `getStaticPaths`와 `getStaticProps`
+   - 정적으로 결정된 페이지를 보여주고자 할 때 사용되는 함수로 결과를 바탕으로 페이지에 렌더링을 한다.
+   - 즉, 빌드 시점에 모든 조합을 페이지로 렌더링이 가능하다.
+     - 다이나이믹 라우트로 들어오는 경우 상품과 같은 여러 이미지의 목록 항목을 미리 먼저 뿌려주고자 할때 사용 하면 된다.
+   - `getStaticPaths`는 정해진 값으로만 허용
+     - `fallback`
+       - false: `getStaticPaths`에서 리턴하지 않은 페이지는 모두 404로 연결
+       - true: getStaticPaths에서 리턴하지 않은 페이지에 접속 시,
+         - 먼저 사용자에게 `fallback` 페이지를 보여줌
+         - 서버에서 static하게 페이지를 생성함
+         - 해당 페이지를 사용자에게 보여줌
+         - 다음부터 해당 페이지로 접속하는 사용자에게는 static한 페이지를 보여줌 (캐싱)
+       - blocking: getStaticPaths에서 리턴하지 않은 페이지에 접속 시, 즉 fallback 페이지나 로딩 화면이 없다.
+         - 사용자에게 server side rendering한 static 페이지를 보여줌
+         - 다음부터 해당 페이지로 접속하는 사용자에게는 server side rendering한 static 페이지를 보여줌
+     ```
+     export const getStaticPaths: getStaticPaths = async () => {
+       retrun {
+         // 1번과 2번을 사전 빌드를 할 수 있도록 요청 값을 정해 둔다.
+         paths: [{params: {id: '1'}, {params: {id: '2'}],
+         fallback: false, // false, true, blocking
+       }
+     }
+     ```
+   - `getStaticProps`는 데이터 요청 수행을 통해 props로 반환
+     ```
+     export const getStaticProps: getStaticProps = async ({params}) => {
+       const {id} = params
+       // 각 id별 데이터 가져오기
+       const post = await = fetchPost(id)
+     
+       retrun {
+         props: {post},
+         revalidate: 60 * 60 // 경우에 따라 ISR로 제공해야 할 수 도 있다.
+       }
+     }
 
+     export default function Post({ post }) {
+       const router = useRouter()
+       if(router.isFallback) {
+         // fallback true 시......
+         return <div>isFallbackisFallbackisFallbackisFallback</div>
+       }
+       return <h1>{post.title}</h1>;
+     }
+     ```
+- `getServerSideProps`
+   - 페이지 진입 전 이 함수가 실행됨
+   - 응답 값에 따라 페이지의 루트 컴포넌트에 props를 반환하거나, 다른 페이지로 리다이렉트 시킬 수 있다.
+     ```
+     export const GetServerSideProps: GetServerSideProps = async (context) => {
+       // context.query.id 를 통해 /post/[id] 같은 경로의 id 값에 접근이 가능하고 이 값을 통해 렌더링 수행
+       const {
+         query: { id = '' },
+       } = context;
+       const post = await fetchPost(id.toString())
 
+       	if (!post) {
+      		redirect: {
+      			destination: '/404' // 리다이렉트 처리를 하는것은 클리이언트에서 하는 것보다 서버에서 하는것이 더 자연스럽다
+      		}
+      	}
 
-
+       return {
+         props: { post },
+       }
+     }
+    
+     export defautl function Post({ post }: { post: Post }) {
+     }
+     ```
+   - HTML이 getSererSideProps 기반으로 렌더링되어 있고 여기서 눈여겨봐야 할 것은 id="__NEXT_DATA__" 의 script 이다.
+     - 서버에서 fetch등으로 렌더링에 필요한 정보를 가져온다.
+     - 가져온 정보를 기반으로 HTML을 완성
+     - 위 정보를 기반으로 클라이언트에 제공
+     - 클라이언트에서 hydrate작업을 한다. (DOM에 리액트 라이프사이클과 이벤트 핸들러를 추가)
+     - hydrate로 만든 리액트 컴포넌트 트리와 서버에서 만든 HTML이 다르면 불일치 에러를 뱉는다.
+     - fetch등을 이용해 정보를 가져온다.
+     ```
+       <body>
+        <script id="__NEXT_DATA__" type="application/json">
+          {
+            "props": {
+              "pageProps": {
+                "post": { "title": "안녕하세요", "contents": "반갑습니다." }
+              },
+              "__N_SSP": true
+            },
+            "page": "/post/[id]",
+            "query": { "id": "1" },
+            "buildId": "development",
+            "isFallback": false,
+            "gssp": true,
+            "scriptLoader": []
+          }
+        </script>
+      </body>
+      ```
+    
+  - 정리
+    - 가져온 정보를 HTML에 script형태로 내려주어 1 ~ 6 번 작업을 반복하지 않아도 되어 불필요한 요청을 막고 시점 차이로 인한 결과물의 차이도 막을 수 있다
+    - **. 즉, 6번에서 재용청하는 대신에 script 를 그대로 읽어서 동일한 데이터를 가져오는 것이다. 또한 window 객체에도 저장해 둔다.**
+    - JSON으로만 props를 제공해주기에 JSON으로 직렬화할 수 없는 값(class, Date, 함수 등)은 제공이 불가능하다.
+    - getServerSideProps는 매 페이지를 호출할때마다 실행되고, 이 실행이 끝나기 전까지는 사용자에게 어떠한 HTML도 보여줄 수 없기 때문에 최대한 간결하게 작성해야 한다.
 
