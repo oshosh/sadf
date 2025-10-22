@@ -710,3 +710,45 @@ module.exports = configs
     - JSON으로만 props를 제공해주기에 JSON으로 직렬화할 수 없는 값(class, Date, 함수 등)은 제공이 불가능하다.
     - getServerSideProps는 매 페이지를 호출할때마다 실행되고, 이 실행이 끝나기 전까지는 사용자에게 어떠한 HTML도 보여줄 수 없기 때문에 최대한 간결하게 작성해야 한다.
 
+- `getInitialProps`
+  - 제한적 사용만 가능하며, `_app.tsx`, `_error.tsx`와 같은 일부 페이지에서 밖에 사용이 안됨.
+  - 이전 예약어와 달리 `props` 객체를 반환하는 것이 아니라 객체를 반환한다.
+  - 상황에 따라 클라이언트나 서버에서 둘다 호출이 된다. 
+  - 최초 서버 상태의 첫 진입 시점을 판단 할 수 있다.
+    - `_app.tsx`에서 판단이 가능한데 `getServerSideProps`가 존재하는 라우트에 접근할때 `_next/data/...../블라블라.json`으로 요청하게 되는데 없다면 클라이언트 렌더링 발생이라 판단하면 된다.
+    ```
+    import Link from "next/link";
+    import { NextPageContext } from "next";
+
+    export default function Todo({ todo }: { todo: { userId: number; id: number; title: string; completed: boolean } }) {
+      return (
+        <>
+          <h1>{todo.title}</h1>
+          <ul>
+            <li>
+              <Link href="/todo/1">1번</Link>
+            </li>
+
+            <li>
+              <Link href="/todo/2">2번</Link>
+            </li>
+
+            <li>
+              <Link href="/todo/3">3번</Link>
+            </li>
+          </ul>
+        </>
+      );
+    }
+
+    Todo.getInitialProps = async (ctx: NextPageContext) => {
+      const {
+        query: { id = "" },
+      } = ctx;
+      const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${id}`);
+      const result = await response.json();
+      return { todo: result };
+    };
+    ```
+
+### 4.3.5
