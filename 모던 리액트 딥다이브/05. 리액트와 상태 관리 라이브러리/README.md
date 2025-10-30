@@ -268,6 +268,7 @@
 
       - useStoreSelector
         - `useStore`를 보완 한 코드로 실제 꺼내고자 하는 `selector(store.get())` store의 값을 가져와서 setState를 각각 반영 해주면 이전에 같은 `값만 `!!! 비교 하기 때문에 전역으로 사용 시 리렌더링을 막을 수 있다.
+        - 현재는 react에서 useSyncExternalStore 로 이러한 내용을 통해 구현된 훅이 있다.
       ```
       import { useState, useEffect } from 'react';
       import type { Store } from './store';
@@ -290,3 +291,179 @@
         return state;
       }
       ```
+      - 5.2.3 useState와 Context를 동시에 사용해 보기
+        - 위에서 만들었던 훅은 단점이 있는데, 훅과 스토어를 사용하는 구조는 반드시 하나의 스토어만 가지게 된다는 것이다. 
+        - 만약 훅을 사용하는 서로 다른 스코프에서 스토어 구조는 동일하되, 여러 개의 서로 다른 데이터를 공유하고 싶다면?
+          - 반복적으로 스토어를 생성시점과 스토어의 공유 범위를 보면 효율적이지 않다.
+          ```
+          const store1 = createStore({ count: 0 });
+          const store2 = createStore({ count: 0 });
+          const store3 = createStore({ count: 0 });
+
+          function Counter1() {
+            const counter = useStoreSelector(store1, useCallback((state) => state.count, []);
+
+            // 생략...
+          }
+          ```
+        - 위와 같은 문제로 하나의 인스턴스 내에서 독립적인 스코프를 가지게 하려면 `Context`를 통해 하위 컴포넌트로 주입 시켜 접근하게 한다.
+          - Context 영역을 잘 나눠 부모와 자식간 책임과 역할을 분리하여 코드 작성이 용이 해진다.
+        ```
+        export type CounterStore = {
+            count: number;
+            text: string;
+        }
+
+        const defaultStore = createStore<CounterStore>({ count: 0, text: "hello" });
+        export const CounterStoreContext = createContext<Store<CounterStore>>(defaultStore);
+
+        export const CounterProvider = ({ 
+            initialState, children 
+        }: PropsWithChildren<{ initialState: CounterStore }>) => {
+            const storeRef = useRef<Store<CounterStore>>()
+
+            if (!storeRef.current) {
+                storeRef.current = createStore(initialState);
+            }
+
+            return (
+                <CounterStoreContext.Provider value={storeRef.current}>
+                    {children}
+                </CounterStoreContext.Provider>
+            )
+        };
+
+        // https://www.npmjs.com/package/use-subscription
+        export const useCounterContextSelector = <State extends unknown>(
+            selector: (state: CounterStore) => State
+        ) => {
+            const store = useContext(CounterStoreContext);
+            const subscribe = useSubscription(
+                useMemo(() => {
+                    return {
+                        getCurrentValue: () => selector(store.get()),
+                        subscribe: store.subscribe,
+                    }
+                }, [store, selector]),
+            );
+
+            return [subscribe, store.set] as const;
+        }
+
+        function App() {
+          return (
+            <>
+              {/* 0 */}
+              <ContextCounter />
+              {/* hi */}
+              <ContextInput />
+              <CounterProvider initialState={{ count: 10, text: "hello" }}>
+                {/* 10 */}
+                <ContextCounter />
+                {/* hello */}
+                <ContextInput />
+              </CounterProvider>
+              <CounterProvider initialState={{ count: 20, text: "world" }}>
+                {/* 20 */}
+                <ContextCounter />
+                {/* world */}
+                <ContextInput />
+              </CounterProvider>
+            </>
+          )
+        }
+        ```
+      - 5.2.4 상태 관리 라이브러리 Recoil, Jotai, Zustand 살펴보기
+        - Recoil, Jotai : 스토어가 가지는 클로저를 기반으로 생성
+        - Zustand: Redux와 비슷하게 큰 소토어를 기반으로 상태를 관리
+
+          - Recoil
+            - 현재는 0.7.7 이후 패치 이력이 없다.
+            - 핵심 기능 알아보기
+              - RecoilRoot
+                ```
+                function notInAContext() {
+                  throw err('This component must be used inside a <RecoilRoot> component.');
+                }
+
+                // 외부에서는 RecoilRoot로 감싸지 않으면 오류를 호출하게 함
+                const defaultStore: Store = Object.freeze({
+                  storeID: getNextStoreID(), // 스토어 아이디 값
+                  getState: notInAContext, // 스토어 값 가져옴
+                  replaceState: notInAContext, // 스토어 수정
+                  getGraph: notInAContext,
+                  subscribeToTransactions: notInAContext,
+                  addTransactionMetadata: notInAContext,
+                });
+
+                const AppContext = React.createContext<StoreRef>({current: defaultStore});
+                const useStoreRef = (): StoreRef => useContext(AppContext);
+
+                function RecoilRoot(props: Props): React.Node {
+                  const {override, ...propsExceptOverride} = props;
+
+                  // AppContext가 가진 스토어
+                  const ancestorStoreRef = useStoreRef();
+
+                  // 상위에 이미 RecoilRoot가 있고, 나는 그 store를 override(덮어쓰기)하지 않겠다고 지정했다면 새 store를 만들지 말고 상위 store를 그대로 써라.
+                  if (override === false && ancestorStoreRef.current !== defaultStore) {
+                    // If ancestorStoreRef.current !== defaultStore, it means that this
+                    // RecoilRoot is not nested within another.
+                    return props.children;
+                  }
+
+                  return <RecoilRoot_INTERNAL {...propsExceptOverride} />;
+                }
+                ```
+                - replaceState
+                  - 변경된 상태를 하위 컴포넌트로 전파해 컴포넌트에 리렌더링을 일으키는 notifyComponents가 있다.
+                ```
+                const replaceState = (replacer: TreeState => TreeState) => {
+                  startNextTreeIfNeeded(storeRef.current);
+                  // Use replacer to get the next state:
+                  const nextTree = nullthrows(storeStateRef.current.nextTree);
+                  let replaced;
+                  try {
+                    stateReplacerIsBeingExecuted = true;
+                    replaced = replacer(nextTree);
+                  } finally {
+                    stateReplacerIsBeingExecuted = false;
+                  }
+                  if (replaced === nextTree) {
+                    return;
+                  }
+
+                  // Save changes to nextTree and schedule a React update:
+                  storeStateRef.current.nextTree = replaced;
+                  if (reactMode().early) {
+                    notifyComponents(storeRef.current, storeStateRef.current, replaced);
+                  }
+                };
+                ```
+
+                - notifyComponents
+                  -  스토어를 사용하고 있는 모든 하위 의존성(하위 atom)을 검색한다음 해당 컴포넌트들의 콜백을 모두 실행
+                    - atom: 상태를 나타내는 Recoil의 최소 상태 단위
+                    - useRecoilValue: atom의 값을 읽어오는 훅
+                    - useRecoilState: 단순히 atom의 값을 가져오기도 하고 값을 변경도 할 수 있는 훅
+                ```
+                function notifyComponents(
+                  store: Store,
+                  storeState: StoreState,
+                  treeState: TreeState,
+                ): void {
+                  const dependentNodes = getDownstreamNodes(
+                    store,
+                    treeState,
+                    treeState.dirtyAtoms,
+                  );
+                  for (const key of dependentNodes) {
+                    const comps = storeState.nodeToComponentSubscriptions.get(key);
+                    if (comps) {
+                      for (const [_subID, [_debugName, callback]] of comps) {
+                        callback(treeState);
+                      }
+                    }
+                  }
+                }
+                ```
