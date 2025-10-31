@@ -467,3 +467,166 @@
                   }
                 }
                 ```
+          - Jotai
+            - 리덕스와 같이 하나의 큰 상태를 애플리케이션에 내려주는 방식이 아니라, 작은 단위의 상태를 위로 전파할 수 있는 구조를 취하고 있음.
+            - Recoil과 같은 atom 개념이지만 상태의 시작점이 다르다.
+              - 데이터의 흐름을 구성 할때 Jotai의 경우 필요 atom만 생성하여 위로 조합을 하고 Recoil의 경우 atom 선언 후 Recoil 내부적으로 RecoilRoot -> Atom -> Selector 트리를 먼저 구성 후에 컴포넌트 값을 구동합니다.
+            ```
+            export function atom<Value, Args extends unknown[], Result>(
+              read: Value | Read<Value, SetAtom<Args, Result>>,
+              write?: Write<Args, Result>,
+            ) {
+              // Recoil과 다르게 고유 key를 생성함
+              const key = `atom${++keyCount}`
+
+              const config = {
+                toString: () => key,
+              } as WritableAtom<Value, Args, Result> & { init?: Value }
+
+              if (typeof read === 'function') {
+                config.read = read as Read<Value, SetAtom<Args, Result>>
+              } else {
+                config.init = read
+                config.read = function (get) {
+                  return get(this)
+                }
+                config.write = function (
+                  this: PrimitiveAtom<Value>,
+                  get: Getter,
+                  set: Setter,
+                  arg: SetStateAction<Value>,
+                ) {
+                  return set(
+                    this,
+                    typeof arg === 'function'
+                      ? (arg as (prev: Value) => Value)(get(this))
+                      : arg,
+                  )
+                } as unknown as Write<Args, Result>
+              }
+              if (write) {
+                config.write = write
+              }
+              // config 객체 반환 (init, read, write으로 읽기 값 가져오기, 값 설정)
+              return config
+            }
+            ```
+            - useAtomValue
+            ```
+            export function useAtomValue<Value>(atom: Atom<Value>, options?: Options) {
+              // - unstable_promiseStatus: React.use 존재 여부에 따른 기본값.
+              //   기본값은 `!React.use` 이므로
+              //   * React 18+ (React.use 존재)   -> false (React가 Suspense로 promise 관리)
+              //   * React 17 이하 (React.use 없음)-> true  (Jotai가 promise 상태 수동 관리)
+              const { delay, unstable_promiseStatus: promiseStatus = !React.use } =
+                options || {}
+              const store = useStore(options)
+
+              // 최적화된 값 추적을 위한 useReducer 패턴
+              // state: [현재값, 사용 중인 store 참조, 사용 중인 atom 참조]
+              // rerender: 강제 리렌더 트리거 (state 변경용)
+              const [[valueFromReducer, storeFromReducer, atomFromReducer], rerender] =
+                useReducer<readonly [Value, Store, typeof atom], undefined, []>(
+                  (prev) => {
+                    // 매 렌더마다 최신 값을 store에서 읽는다
+                    const nextValue = store.get(atom)
+
+                    // 변경 없음 최적화:
+                    // 1) 이전 값과 새 값이 동일(Object.is)
+                    // 2) 이전에 사용하던 store와 현재 store가 동일
+                    // 3) 이전에 사용하던 atom과 현재 atom이 동일
+                    // => 이 경우 굳이 새로운 state를 만들지 않고 prev 반환(리렌더 방지)
+                    if (
+                      Object.is(prev[0], nextValue) &&
+                      prev[1] === store &&
+                      prev[2] === atom
+                    ) {
+                      return prev
+                    }
+                    // 변경이 있으면 [새값, 현재 store, 현재 atom]으로 교체
+                    return [nextValue, store, atom]
+                  },
+                  undefined,
+                  () => [store.get(atom), store, atom],
+                )
+
+              let value = valueFromReducer
+              if (storeFromReducer !== store || atomFromReducer !== atom) {
+                rerender()
+                value = store.get(atom)
+              }
+
+              useEffect(() => {
+                const unsub = store.sub(atom, () => {
+                  if (promiseStatus) {
+                    try {
+                      const value = store.get(atom)
+                      if (isPromiseLike(value)) {
+                        attachPromiseStatus(
+                          createContinuablePromise(value, () => store.get(atom)),
+                        )
+                      }
+                    } catch {
+                      // ignore
+                    }
+                  }
+                  if (typeof delay === 'number') {
+                    // delay rerendering to wait a promise possibly to resolve
+                    setTimeout(rerender, delay)
+                    return
+                  }
+                  rerender()
+                })
+                rerender()
+                return unsub
+              }, [store, atom, delay, promiseStatus])
+
+              useDebugValue(value)
+              if (isPromiseLike(value)) {
+                const promise = createContinuablePromise(value, () => store.get(atom))
+                if (promiseStatus) {
+                  attachPromiseStatus(promise)
+                }
+                return use(promise)
+              }
+              return value as Awaited<Value>
+            }
+            ``` 
+            - useAtom
+            ```
+            export function useAtom<Value, Args extends any[], Result>(
+              atom: Atom<Value> | WritableAtom<Value, Args, Result>,
+              options?: Options,
+            ) {
+              return [
+                useAtomValue(atom, options),
+                // We do wrong type assertion here, which results in throwing an error.
+                useSetAtom(atom as WritableAtom<Value, Args, Result>, options),
+              ]
+            }
+
+            // useSetAtom.ts
+            export function useSetAtom<Value, Args extends any[], Result>(
+              atom: WritableAtom<Value, Args, Result>,
+              options?: Options,
+            ) {
+              const store = useStore(options)
+
+              const setAtom = useCallback(
+                // store에 atom에 해당하는 값을 set하는 함수를 제공
+                (...args: Args) => {
+                  // ...
+                  return store.set(atom, ...args)
+                },
+                [store, atom],
+              )
+
+              return setAtom
+            }
+
+            // Provider.ts
+            export const useStore = (options?: Options): Store => {
+              const store = useContext(StoreContext)
+              return options?.store || store || getDefaultStore()
+            }
+            ```
