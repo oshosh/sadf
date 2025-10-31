@@ -630,3 +630,50 @@
               return options?.store || store || getDefaultStore()
             }
             ```
+          - Zustand
+            - 하나의 스토어를 중앙 집중형으로 활용해 이 스토어 내부에서 상태를 관리하고 있다.
+            - 5.2.2에서 만든 createStore 와 유사하다.
+            - react 18에서는 useSyncExternalStore 를 기반으로 createStoreImpl를 구현함 아래는 바닐라다.
+            ```
+            const createStoreImpl: CreateStoreImpl = (createState) => {
+              type TState = ReturnType<typeof createState>
+              type Listener = (state: TState, prevState: TState) => void
+              let state: TState
+              const listeners: Set<Listener> = new Set()
+
+              const setState: StoreApi<TState>['setState'] = (partial, replace) => {
+                // TODO: Remove type assertion once https://github.com/microsoft/TypeScript/issues/37663 is resolved
+                // https://github.com/microsoft/TypeScript/issues/37663#issuecomment-759728342
+                const nextState =
+                // 일부 변경만 하고 싶을때
+                  typeof partial === 'function'
+                    ? (partial as (state: TState) => TState)(state)
+                    : partial
+                if (!Object.is(nextState, state)) {
+                  const previousState = state
+                  // 완전히 새로 변경 할때
+                  state =
+                    (replace ?? (typeof nextState !== 'object' || nextState === null))
+                      ? (nextState as TState)
+                      : Object.assign({}, state, nextState)
+                  listeners.forEach((listener) => listener(state, previousState))
+                }
+              }
+
+              // 클로저의 최신 값을 가져오기 위해 함수로 만듬
+              const getState: StoreApi<TState>['getState'] = () => state
+
+              const getInitialState: StoreApi<TState>['getInitialState'] = () =>
+                initialState
+
+              const subscribe: StoreApi<TState>['subscribe'] = (listener) => {
+                listeners.add(listener)
+                // Unsubscribe
+                return () => listeners.delete(listener)
+              }
+
+              const api = { setState, getState, getInitialState, subscribe }
+              const initialState = (state = createState(setState, getState, api))
+              return api as any
+            }
+            ```
