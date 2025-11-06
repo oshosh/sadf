@@ -1,0 +1,24 @@
+<html>
+    <body>  
+        <div id="parent" style="padding: 30px; background: #cde;">
+            parent
+            <button id="child" style="padding: 10px;">child</button>
+        </div>
+    </body>
+    <script>
+    const parent = document.getElementById('parent');
+    const child = document.getElementById('child');
+    
+    // parent.addEventListener('click', (e) => {
+    //     console.log('parent 리스너 실행!');
+    //     console.log('event.target:', e.target);
+    //     console.log('event.currentTarget:', e.currentTarget);
+    // });
+    
+    child.addEventListener('click', (e) => {
+        console.log('child 리스너 실행!');
+        console.log('event.target:', e.target);
+        console.log('event.currentTarget:', e.currentTarget);
+    });
+    </script>
+</html>

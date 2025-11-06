@@ -64,4 +64,183 @@
         </body>
       </html>
       ```
+    - 이벤트 위임
+      - 사용자의 액션에 의해 이벤트 발생 시 이벤트는 버블링에 의해 document 레벨까지 올라가게 되는데 이로 인해 자식 엘리먼트에서 발생하는 이벤트를 부모가 감지 할 수 있는데 이런 작동 방식을 이용해 자식 엘리먼트의 이벤트를 부모로 위임 시켜 처리하는 방식을 말합니다.
+      - 동적 엘리먼트 생성 시에도 유용 하다.
 
+    - `event.currentTarget` vs `event.target`
+      - `event.currentTarget`: 실제 누른 주체로 실행되는 요소라 보면 된다.
+      - `event.target`: 이벤트를 발생 시킨 위치라 보면 된다.
+    ```
+    <html>
+      <body>  
+        <div id="parent" style="padding: 30px; background: #cde;">
+          parent
+          <button id="child" style="padding: 10px;">child</button>
+        </div>
+      </body>
+      <script>
+        const parent = document.getElementById('parent');
+        const child = document.getElementById('child');
+
+        // 이벤트 위임을 사용해서 비교 해보기
+        parent.addEventListener('click', (e) => {
+          console.log('parent 리스너 실행!');
+          console.log('event.target:', e.target); // parent 엘리먼트를 누르면 parent child를 누르면 child 
+          console.log('event.currentTarget:', e.currentTarget); // parent 내에서 어딜 누르던 parent 엘리먼트
+        });
+      
+        // 이건 이벤트 영역이 child로 되어 있기때문에 child 엘리먼트만 나온다.
+        <!-- child.addEventListener('click', (e) => {
+          console.log('child 리스너 실행!');
+          console.log('event.target:', e.target);
+          console.log('event.currentTarget:', e.currentTarget);
+        }); -->
+      </script>
+    </html>
+
+    <!-- 리액트에서는 어떻게 사용 할까? -->
+    // ul로 handleClick를 위임 시켰지만 li 각 요소들을 정확하게 구분하기 위해서는 e.target를 통해 실제 누른 주체를 찾는다.
+    function List({ items }) {
+      const handleClick = (e) => {
+        const target = e.target.closest('li'); // 실제 클릭된 li 찾기
+        if (!target) return;
+        console.log('clicked item id:', target.dataset.id);
+      };
+
+      return (
+        <ul onClick={handleClick}>
+          {items.map((item) => (
+            <li key={item.id} data-id={item.id}>
+              {item.name}
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    ```
+
+    - 이벤트 위임 예시 전 자식 엘리먼트에 각각 `addEventListener`를 부여 하는 경우 메모리 측면에서 문제가 있는 예시
+    ```
+    <html>
+      <body>
+        <div class="menu">
+          <button class="items">첫번째 버튼</button>
+          <button class="items">두번째 버튼</button>
+          <button class="items">세번째 버튼</button>
+        </div>
+        <script>
+          for (const item of document.querySelectorAll(".items")) {
+            item.addEventListener("click", (e) => {
+              alert(`${e.target.innerText}입니다.`);
+            });
+          }
+        </script>
+      </body>
+    </html>
+    ```
+
+    - `이벤트 버블링`을 통한 부모 엘리먼트에게 이벤트를 위임하는 코드
+    ```
+    <html>
+      <body>
+        <div class="menu">
+          <button class="items">첫번째 버튼</button>
+          <button class="items">두번째 버튼</button>
+          <button class="items">세번째 버튼</button>
+        </div>
+        <script>
+          const menu = document.querySelector(".menu");
+          menu.addEventListener("click", (e) => {
+            alert(`${e.target.innerText}입니다.`);
+          });
+        </script>
+      </body>
+    </html>
+    ```
+
+    - 동적 엘리먼트 생성으로 이벤트를 위임할떄 효율적이다.
+    ```
+    <!DOCTYPE html>
+    <html>
+      <body>
+        <button class="create">CREATE</button>
+        <div class="menu">
+          <button class="items">첫번째 버튼</button>
+          <button class="items">두번째 버튼</button>
+          <button class="items">세번째 버튼</button>
+        </div>
+        <script>
+          const menu = document.querySelector(".menu");
+          const create = document.querySelector(".create");
+
+          create.addEventListener("click", () => {
+            menu.innerHTML += `
+              <button class="items">네번째 버튼</button>
+              <button class="items">다섯번째 버튼</button>
+            `;
+          });
+
+          // create 버튼을 누르기 전에 이미 이벤트 리스너가 등록되어 있기때문에 네번째, 다섯번째 버튼 클릭 시는 이벤트 발생이 안된다.
+          for (const item of document.querySelectorAll(".items")) {
+            item.addEventListener("click", (e) => {
+              alert(`${e.target.innerText}입니다.`);
+            });
+          }
+        </script>
+      </body>
+    </html>
+
+
+    <html>
+      <body>
+        <button class="create">CREATE</button>
+        <div class="menu">
+          <button class="items">첫번째 버튼</button>
+          <button class="items">두번째 버튼</button>
+          <button class="items">세번째 버튼</button>
+        </div>
+        <script>
+          const menu = document.querySelector(".menu");
+          const create = document.querySelector(".create");
+
+          create.addEventListener("click", () => {
+            menu.innerHTML += `
+              <button class="items">네번째 버튼</button>
+              <button class="items">다섯번째 버튼</button>
+            `;
+          });
+
+          // 부모로 위임을 함으로서 버블링 이벤트에 의해 이벤트가 동작한다.
+          menu.addEventListener("click", (e) => {
+            alert(`${e.target.innerText}입니다.`);
+          });
+        </script>
+      </body>
+    </html>
+    ```
+
+    - 리액트 이벤트 처리 방식
+      - li 태그에 1만개의 onClick를 구현해도 react는 리스너를 1만개 만들까?
+        => 결론은 아니다. 리액트 내부 위임 방식으로 인해 17 버전 이후 부터는 root Dom Container 에 SyntheticEvent를 통해 이벤트를 위임 하여 처리를 한다. 하지만 클로저 메모리에는 약간 문제가 있는게 분명하다.
+        => 16 버전 이하에서는 Native Dom 이벤트로 이벤트를 위임 시켜 document 전역 위임 시킴
+          - 다중 React 앱 충돌로 인해 인식이 어려웠다는 점을 찾을 수 있음
+    ```
+    function App() {
+      const [items, setItems] = useState(['항목1', '항목2', '항목3'])
+      const handleClick(e, item) => {
+        alert('ㅎㅇㅎㅇ')
+      }
+      return (
+        <div>
+          <ul>
+            {items.map((item, index)=> {
+              return {
+                <li key={index} onClick={handleClick(item)}>{item}</li>
+              }
+            })}
+          </ul>
+        </div>
+      )
+    }
+    ```
