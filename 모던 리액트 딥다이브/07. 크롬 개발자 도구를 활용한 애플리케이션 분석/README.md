@@ -244,3 +244,77 @@
       )
     }
     ```
+## 7.6 Next 환경 디버깅하기
+  - `npx create-next-app@12 my-next-app`
+  - ApacheBench 설치를 통한 성능 측정 방법
+    - https://www.apachelounge.com/download/
+    - 압축 해제 > bin > exe 경로 시스템 환경변수 PATH로 등록
+    - ab -k -c 50 -n 10000 http://127.0.0.1:3000/ > 테스트
+      - 명령어 옵션 설명
+        - `-k` : Keep-Alive 사용 (HTTP 커넥션 재사용)
+        - `-c 50`: 동시 접속자 50명
+        - `-n 10000` : 총 10,000번 요청
+        ```
+        This is ApacheBench, Version 2.3 <$Revision: 1923142 $>
+        Copyright 1996 Adam Twiss, Zeus Technology Ltd, http://www.zeustech.net/
+        Licensed to The Apache Software Foundation, http://www.apache.org/
+
+        Benchmarking 127.0.0.1 (be patient)
+        Completed 1000 requests
+        Completed 2000 requests
+        Completed 3000 requests
+        Completed 4000 requests
+        Completed 5000 requests
+        Completed 6000 requests
+        Completed 7000 requests
+        Completed 8000 requests
+        Completed 9000 requests
+        Completed 10000 requests
+        Finished 10000 requests
+
+
+        Server Software:
+        Server Hostname:        127.0.0.1
+        Server Port:            3000
+
+        Document Path:          /
+        Document Length:        899 bytes
+
+        Concurrency Level:      50
+        Time taken for tests:   3.930 seconds
+        Complete requests:      10000
+        Failed requests:        0
+        Keep-Alive requests:    10000
+        Total transferred:      11290000 bytes
+        HTML transferred:       8990000 bytes
+        Requests per second:    2544.22 [#/sec] (mean)
+        Time per request:       19.652 [ms] (mean)
+        Time per request:       0.393 [ms] (mean, across all concurrent requests)
+        Transfer rate:          2805.10 [Kbytes/sec] received
+
+        Connection Times (ms)
+                      min  mean[+/-sd] median   max
+        Connect:        0    0   0.0      0       1
+        Processing:     7   20  10.9     15      75
+        Waiting:        4   20  10.9     15      75
+        Total:          7   20  10.9     15      75
+
+        Percentage of the requests served within a certain time (ms)
+          50%     15
+          66%     17
+          75%     20
+          80%     22
+          90%     32
+          95%     49
+          98%     57
+          99%     63
+        100%     75 (longest request)
+        ```
+  - Chrome inspect를 통한 디버깅 방법
+    - `"dev": "NODE_OPTIONS='--inspect' next dev",` 혹은 `"dev": "cross-env NODE_OPTIONS=--inspect next dev",`
+
+    - 실행 시 아래와 같은 ws 주소가 나오면 직접 접근
+      - node 관련해서 debugger은 아래에서 자세하게 디버깅이 가능함
+    ```
+      devtools://devtools/bundled/inspector.html?v8only=true&ws=127.0.0.1:9230/95433c0e-a282-4973-9d1b-ff494cbdd273
+    ```
