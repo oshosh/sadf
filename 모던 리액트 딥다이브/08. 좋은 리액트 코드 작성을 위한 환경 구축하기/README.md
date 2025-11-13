@@ -614,3 +614,327 @@
       });
   });
   ```
+
+  - 비동기 이벤트가 발생하는 컴포넌트
+    - 데이터를 불러오는 데 성공하면 응답값 중 하나를 노출하지만, 실패하면 에러 문구를 노출하는 컴포넌트를 테스트 하자
+    - spyOn에서 window에 기본적으로 제공하는 fetch를 사용하게 되면 모든 시나리오에 대한 ok, status, json 값을 전부 테스트 하기에 코드가 길고 복잡함으로 MSW를 사용한다.
+  ```
+  import { MouseEvent, useState } from "react";
+
+  interface TodoResponse {
+      userId: number;
+      id: number;
+      title: string;
+      completed: false;
+  }
+
+  export function FetchComponent() {
+      const [data, setData] = useState<TodoResponse | null>(null);
+      const [error, setError] = useState<number | null>(null);
+
+      async function handleButtonClick(e: MouseEvent<HTMLButtonElement>) {
+          const id = e.currentTarget.dataset.id;
+
+          const response = await fetch(`/todos/${id}`);
+
+          if (response.ok) {
+              const result: TodoResponse = await response.json();
+              setData(result);
+          } else {
+              setError(response.status);
+          }
+      }
+
+      return (
+          <div>
+              <p>{data === null ? "불러온 데이터가 없습니다." : data.title}</p>
+
+              {error && (
+                  <p style={{ backgroundColor: "red" }}>에러가 발생했습니다</p>
+              )}
+
+              <ul>
+                  {Array.from({ length: 10 }).map((_, index) => {
+                      const id = index + 1;
+                      return (
+                          <button
+                              key={id}
+                              data-id={id}
+                              onClick={handleButtonClick}
+                          >
+                              {`${id}번`}
+                          </button>
+                      );
+                  })}
+              </ul>
+          </div>
+      );
+  }
+  ```
+  - setupServer: MSW에서 제공하는 메서드로 이름 그대로 서버를 만드는 역할
+  - afterEach, resetHandlers: 각 테스트가 진행될 때마다 서버를 종료시킨다. setupServer의 기본 설정으로 되돌리는 역할을 한다.
+  ```
+  import { fireEvent, render, screen } from '@testing-library/react'
+  import { rest } from 'msw'
+  import { setupServer } from 'msw/node'
+
+  import { FetchComponent } from '.'
+
+  const MOCK_TODO_RESPONSE = {
+    userId: 1,
+    id: 1,
+    title: 'delectus aut autem',
+    completed: false,
+  }
+
+  // MSW에서 제공하는 메서드로 이름 그대로 서버를 만드는 역할
+  const server = setupServer(
+    rest.get('/todos/:id', (req, res, ctx) => {
+      const todoId = req.params.id
+
+      if (Number(todoId)) {
+        return res(ctx.json({ ...MOCK_TODO_RESPONSE, id: Number(todoId) }))
+      } else {
+        return res(ctx.status(404))
+      }
+    }),
+  )
+
+  beforeAll(() => server.listen())
+  // 각 테스트가 진행될 때마다 서버를 종료시킨다.
+  afterEach(() => server.resetHandlers())
+  afterAll(() => server.close())
+
+  beforeEach(() => {
+    render(<FetchComponent />)
+  })
+
+  describe('FetchComponent 테스트', () => {
+    it('데이터를 불러오기 전에는 기본 문구가 뜬다.', async () => {
+      const nowLoading = screen.getByText(/불러온 데이터가 없습니다./)
+      expect(nowLoading).toBeInTheDocument()
+    })
+
+    it('버튼을 클릭하면 데이터를 불러온다.', async () => {
+      const button = screen.getByRole('button', { name: /1번/ })
+      fireEvent.click(button)
+
+      const data = await screen.findByText(MOCK_TODO_RESPONSE.title)
+      expect(data).toBeInTheDocument()
+    })
+
+  // 서버에 실패한 경우 임의로 상태를 변경하므로 리셋이 필요하다.
+    it('버튼을 클릭하고 서버요청에서 에러가 발생하면 에러문구를 노출한다.', async () => {
+      server.use(
+        rest.get('/todos/:id', (req, res, ctx) => {
+          return res(ctx.status(503))
+        }),
+      )
+
+      const button = screen.getByRole('button', { name: /1번/ })
+      fireEvent.click(button)
+
+      const error = await screen.findByText(/에러가 발생했습니다/)
+      expect(error).toBeInTheDocument()
+    })
+  })
+  ```
+
+  - 사용자 정의 훅 테스트
+    - `react-hooks-testing-library` 아래와 같은 단점으로 사용하여 해당 훅의 비지니스를 테스트 하자.
+      - 사용자 정의 훅이 들어가 있는 컴포넌트 테스트 시 테스트 케이스가 많아 전부 확인이 어려운점
+      - 사용자 정의 훅을 사용하는 모든 컴포넌트를 찾아야하는 단점
+      - 아래 글을 써놨지만 18버전 부터는 `"@testing-library/react"`로 통합됨
+  ```
+  import { useEffect, useRef } from "react";
+
+  export type Props = Record<string, unknown>;
+
+  export const CONSOLE_PREFIX = "[useEffectDebugger]";
+
+  export default function useEffectDebugger(
+      componentName: string,
+      props?: Props
+  ) {
+      const prevProps = useRef<Props | undefined>();
+
+      useEffect(() => {
+          // process.env.NODE_ENV === ‘production’ 인 경우에는 로깅을 하지 않는다.
+          if (process.env.NODE_ENV === "production") {
+              return;
+          }
+
+          const prevPropsCurrent = prevProps.current;
+
+          if (prevPropsCurrent !== undefined) {
+              // 이전 props와 현재 props들의 모든 key를 가져온다.
+              const allKeys = Object.keys({ ...prevProps.current, ...props });
+
+              // 키들을 통해서 props를 얕은 비교를 통해 같은지 확인
+              const changedProps: Props = allKeys.reduce<Props>((result, key) => {
+                  const prevValue = prevPropsCurrent[key];
+                  const currentValue = props ? props[key] : undefined;
+
+                  // 같지 않다면 전에 값과 현재값을 담은 result를 내보내줘 무엇이 렌더링 되었는지 확인시켜준다.
+                  if (!Object.is(prevValue, currentValue)) {
+                      result[key] = {
+                          before: prevValue,
+                          after: currentValue,
+                      };
+                  }
+                  return result;
+              }, {});
+
+              if (Object.keys(changedProps).length) {
+                  // eslint-disable-next-line no-console
+                  console.log(CONSOLE_PREFIX, componentName, changedProps);
+              }
+          }
+
+          prevProps.current = props;
+      });
+  }
+  ```
+
+  - 만약 프로젝트가 18 버전 미만이라면 `@testing-library/react-hooks`를 사용한다.
+  - 18 이후 부터는 `"@testing-library/react"`로 통합
+  ```
+
+  import { renderHook } from "@testing-library/react";
+
+  import useEffectDebugger, { CONSOLE_PREFIX } from "./useEffectDebugger";
+
+  const consoleSpy = jest.spyOn(console, "log");
+  const componentName = "TestComponent";
+
+  describe("useEffectDebugger", () => {
+      afterAll(() => {
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          process.env.NODE_ENV = "development";
+      });
+
+      it("props가 없으면 호출되지 않는다.", () => {
+          renderHook(() => useEffectDebugger(componentName));
+
+          expect(consoleSpy).not.toHaveBeenCalled();
+      });
+
+      it("최초에는 호출되지 않는다.", () => {
+          const props = { hello: "world" };
+
+          renderHook(() => useEffectDebugger(componentName, props));
+
+          expect(consoleSpy).not.toHaveBeenCalled();
+      });
+
+      it("props가 변경되지 않으면 호출되지 않는다.", () => {
+          const props = { hello: "world" };
+
+          const { rerender } = renderHook(() =>
+              useEffectDebugger(componentName, props)
+          );
+
+          expect(consoleSpy).not.toHaveBeenCalled();
+
+          rerender();
+
+          expect(consoleSpy).not.toHaveBeenCalled();
+      });
+
+      it("props가 변경되면 다시 호출한다.", () => {
+          const props = { hello: "world" };
+
+          const { rerender } = renderHook(
+              ({ componentName, props }) =>
+                  useEffectDebugger(componentName, props),
+              {
+                  initialProps: {
+                      componentName,
+                      props,
+                  },
+              }
+          );
+
+          const newProps = { hello: "world2" };
+
+          rerender({ componentName, props: newProps });
+
+          expect(consoleSpy).toHaveBeenCalled();
+      });
+
+      it("props가 변경되면 변경된 props를 정확히 출력한다", () => {
+          const props = { hello: "world" };
+
+          const { rerender } = renderHook(
+              ({ componentName, props }) =>
+                  useEffectDebugger(componentName, props),
+              {
+                  initialProps: {
+                      componentName,
+                      props,
+                  },
+              }
+          );
+
+          const newProps = { hello: "world2" };
+
+          rerender({ componentName, props: newProps });
+
+          expect(consoleSpy).toHaveBeenCalledWith(
+              CONSOLE_PREFIX,
+              "TestComponent",
+              {
+                  hello: { after: "world2", before: "world" },
+              }
+          );
+      });
+
+      it("객체는 참조가 다르다면 변경된 것으로 간주한다", () => {
+          const props = { hello: { hello: "world" } };
+          const newProps = { hello: { hello: "world" } };
+
+          const { rerender } = renderHook(
+              ({ componentName, props }) =>
+                  useEffectDebugger(componentName, props),
+              {
+                  initialProps: {
+                      componentName,
+                      props,
+                  },
+              }
+          );
+
+          rerender({ componentName, props: newProps });
+
+          // 이후 호출
+          expect(consoleSpy).toHaveBeenCalled();
+      });
+
+      it("process.env.NODE_ENV가 production이면 호출되지 않는다", () => {
+          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+          // @ts-ignore
+          // 환경변수 값 강제로 주입
+          process.env.NODE_ENV = "production";
+
+          const props = { hello: "world" };
+
+          const { rerender } = renderHook(
+              ({ componentName, props }) =>
+                  useEffectDebugger(componentName, props),
+              {
+                  initialProps: {
+                      componentName,
+                      props,
+                  },
+              }
+          );
+
+          const newProps = { hello: "world2" };
+
+          rerender({ componentName, props: newProps });
+
+          expect(consoleSpy).not.toHaveBeenCalled();
+      });
+  });
+  ```
